@@ -21,7 +21,7 @@ struct acl {
 		in_addr_t mask;
 	} cidr;
 
-	char *http_basic_auth;
+	char *tenant_id;
 
 	/* commands that have been enabled or disabled */
 	struct acl_commands enabled;

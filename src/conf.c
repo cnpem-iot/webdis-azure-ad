@@ -248,30 +248,14 @@ conf_parse_acl(json_t *j) {
 	}
 
 	/* parse basic_auth */
-	if((jbasic = json_object_get(j, "http_basic_auth")) && json_typeof(jbasic) == JSON_STRING) {
+	if((jbasic = json_object_get(j, "tenant_id")) && json_typeof(jbasic) == JSON_STRING) {
 
-		/* base64 encode */
-		base64_encodestate b64;
-		int pos;
-		char *p;
 		char *plain = conf_string_or_envvar(json_string_value(jbasic));
-		size_t len, plain_len = strlen(plain) + 0;
-		len = (plain_len + 8) * 8 / 6;
-		a->http_basic_auth = calloc(len, 1);
+		size_t plain_len = strlen(plain) + 0;
+		a->tenant_id = calloc(plain_len, 1);
+		strcpy(a->tenant_id, plain);
 
-		base64_init_encodestate(&b64);
-		pos = base64_encode_block(plain, (int)plain_len, a->http_basic_auth, &b64);
 		free(plain);
-		if(!pos) { /* nothing was encoded */
-			fprintf(stderr, "Error: could not encode credentials as HTTP basic auth header\n");
-			exit(1);
-		}
-		base64_encode_blockend(a->http_basic_auth + pos, &b64);
-
-		/* end string with \0 rather than \n */
-		if((p = strchr(a->http_basic_auth + pos, '\n'))) {
-			*p = 0;
-		}
 	}
 
 	/* parse enabled commands */

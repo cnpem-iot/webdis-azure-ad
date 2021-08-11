@@ -3,6 +3,8 @@
 
 # About
 
+This is a basic fork of Webdis that utilizes Azure Active Directory for authentication.
+
 A very simple web server providing an HTTP interface to Redis. It uses [hiredis](https://github.com/antirez/hiredis), [jansson](https://github.com/akheron/jansson), [libevent](https://monkey.org/~provos/libevent/), and [http-parser](https://github.com/ry/http-parser/).
 
 Webdis depends on libevent-dev. You can install it on Ubuntu by typing `sudo apt-get install libevent-dev` or on macOS by typing `brew install libevent`.
@@ -106,7 +108,7 @@ f0a2763fd456
 * Multi-threaded server, configurable number of worker threads.
 * WebSocket support (Currently using the “hixie-76” specification).
 * Connects to Redis using a TCP or UNIX socket.
-* Restricted commands by IP range (CIDR subnet + mask) or HTTP Basic Auth, returning 403 errors.
+* Restricted commands by IP range (CIDR subnet + mask) or Azure Active Directory Authentication, returning 403 errors.
 * Support for Redis authentication in the config file: set `redis_auth` to a single string to use a password value, or to an array of two strings to use username+password auth ([new in Redis 6.0](https://redis.io/commands/auth)).
 * Environment variables can be used as values in the config file, starting with `$` and in all caps (e.g. `$REDIS_HOST`).
 * Pub/Sub using `Transfer-Encoding: chunked`, works with JSONP as well. Webdis can be used as a Comet server.
@@ -177,7 +179,9 @@ This new authentication system is only supported in Webdis 0.1.13 and above.
 Access control is configured in `webdis.json`. Each configuration tries to match a client profile according to two criterias:
 
 * [CIDR](https://en.wikipedia.org/wiki/CIDR) subnet + mask
-* [HTTP Basic Auth](https://en.wikipedia.org/wiki/Basic_access_authentication) in the format of "user:password".
+* [Microsoft Azure AD Authentication](https://docs.microsoft.com/en-us/azure/active-directory/authentication/overview-authentication) with the tenant ID for your application.
+
+To access commands, an Authorization header must be sent with a valid token.
 
 Each ACL contains two lists of commands, `enabled` and `disabled`. All commands being enabled by default, it is up to the administrator to disable or re-enable them on a per-profile basis.
 Examples:
@@ -187,7 +191,7 @@ Examples:
 },
 
 {
-	"http_basic_auth": "user:password",
+	"tenant_id": "TENANT_ID",
 	"disabled":	["DEBUG", "FLUSHDB", "FLUSHALL"],
 	"enabled":	["SET"]
 },
@@ -198,7 +202,7 @@ Examples:
 },
 
 {
-	"http_basic_auth": "user:password",
+	"tenant_id": "TENANT_ID",
 	"ip": 		"192.168.10.0/24",
 	"enabled":	["SET", "DEL"]
 }

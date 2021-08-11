@@ -4,20 +4,116 @@
 #include "http.h"
 #include "client.h"
 
+#include <jansson.h>
 #include <string.h>
 #include <evhttp.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <curl/curl.h>
+
+struct memory {
+	char *response;
+	size_t size;
+};
+
+char 
+*strbtwn(const char *str, const char *str1, const char *str2) {
+    const char *q;
+    const char *p = strstr(str, str1);
+    if (p) {
+        p += strlen(str1);
+        q = *str2 ? strstr(p, str2) : p + strlen(p);
+        if (q)
+            return strndup(p, q - p);
+    }
+    return NULL;
+}
+
+static 
+size_t cb(void *data, size_t size, size_t nmemb, void *userp)
+{
+	size_t realsize = size * nmemb;
+	struct memory *mem = (struct memory *)userp;
+
+	char *ptr = realloc(mem->response, mem->size + realsize + 1);
+	if(ptr == NULL)
+		return 0;  /* out of memory! */
+
+	mem->response = ptr;
+	memcpy(&(mem->response[mem->size]), data, realsize);
+	mem->size += realsize;
+	mem->response[mem->size] = 0;
+
+	return realsize;
+}
+
+static int
+auth_ms(const char *token, const char *tenant, char *username) {  
+  CURLcode ret;
+  CURL *hnd;
+  struct curl_slist *slist;
+
+  char *header = (char*)malloc(2400 * sizeof(char));
+  snprintf(header, 2400, "Authorization: Bearer %s", token);
+
+  slist = NULL;
+  slist = curl_slist_append(slist, header);
+
+  struct memory chunk = {0};
+
+  hnd = curl_easy_init();
+  curl_easy_setopt(hnd, CURLOPT_BUFFERSIZE, 102400L);
+  curl_easy_setopt(hnd, CURLOPT_URL, "https://graph.microsoft.com/v1.0/me");
+  curl_easy_setopt(hnd, CURLOPT_HTTPHEADER, slist);
+  curl_easy_setopt(hnd, CURLOPT_USERAGENT, "curl/7.74.0");
+  curl_easy_setopt(hnd, CURLOPT_HTTP_VERSION, (long)CURL_HTTP_VERSION_2TLS);
+  curl_easy_setopt(hnd, CURLOPT_WRITEFUNCTION, cb);
+  curl_easy_setopt(hnd, CURLOPT_WRITEDATA, (void *)&chunk);
+
+  ret = curl_easy_perform(hnd);
+
+  long http_code = 0;
+  curl_easy_getinfo (hnd, CURLINFO_RESPONSE_CODE, &http_code);
+  
+  curl_easy_cleanup(hnd);
+  hnd = NULL;
+  curl_slist_free_all(slist);
+  slist = NULL;
+  free(header);
+
+  json_t *parsed_rep;
+  json_error_t error;
+
+  parsed_rep = json_loads(chunk.response, 0, &error);
+
+  if (parsed_rep) {
+    if (http_code == 200 && ret == CURLE_OK) {
+      const char *ident;
+      ident = json_string_value(json_object_get(parsed_rep, "@odata.id"));
+
+      /* Compare tenant ID from token and declared tenant ID */
+      if(strcmp(tenant, strbtwn(ident, "https://graph.microsoft.com/v2/", "/directoryObjects/")) == 0) {
+        memcpy(username, json_string_value(json_object_get(parsed_rep, "mail")), 128);
+        return 0;
+      }
+    }
+  } else {
+    fprintf(stderr, "json error on line %d: %s\n", error.line, error.text);
+  }
+
+  return 1;
+}
 
 int
 acl_match_client(struct acl *a, struct http_client *client, in_addr_t *ip) {
-
-	/* check HTTP Basic Auth */
+	/* check Azure AD Auth, obtains user info */
 	const char *auth;
+  char username[146] = "";
+  
 	auth = client_get_header(client, "Authorization");
-	if(a->http_basic_auth) {
-		if(auth && strncasecmp(auth, "Basic ", 6) == 0) { /* sent auth */
-			if(strcmp(auth + 6, a->http_basic_auth) != 0) { /* bad password */
+	if(a->tenant_id) {
+		if(auth && strncasecmp(auth, "Bearer ", 7) == 0) {
+			if(auth_ms(auth + 7, a->tenant_id, username)) {
 				return 0;
 			}
 		} else { /* no auth sent, required to match this ACL */
@@ -25,12 +121,15 @@ acl_match_client(struct acl *a, struct http_client *client, in_addr_t *ip) {
 		}
 	}
 
-	/* CIDR check. */
-	if(a->cidr.enabled == 0) { /* none given, all match */
-		return 1;
-	}
-	if(((*ip) & a->cidr.mask) == (a->cidr.subnet & a->cidr.mask)) {
-		return 1;
+  
+	/* CIDR check. Comparision structure slightly altered from the original */
+	if(a->cidr.enabled == 0 || ((*ip) & a->cidr.mask) == (a->cidr.subnet & a->cidr.mask)) {
+    /* Don't log for non-auths */
+    if(username[0] != '\0') {
+      strncat(username, " authenticated", 16);
+      slog(client->s, WEBDIS_NOTICE, username, strlen(username));
+    }
+    return 1;
 	}
 
 	return 0;

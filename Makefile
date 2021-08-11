@@ -6,7 +6,7 @@ FORMAT_OBJS?=src/formats/json.o src/formats/raw.o src/formats/common.o src/forma
 HTTP_PARSER_OBJS?=src/http-parser/http_parser.o
 
 CFLAGS ?= -Wall -Wextra -Isrc -Isrc/jansson/src -Isrc/http-parser -MD
-LDFLAGS ?= -levent -pthread
+LDFLAGS ?= -levent -pthread -lcurl
 
 # Pass preprocessor macros to the compile invocation
 CFLAGS += $(CPPFLAGS)
