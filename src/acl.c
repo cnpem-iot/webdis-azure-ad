@@ -1,60 +1,56 @@
 #include "acl.h"
+#include "client.h"
 #include "cmd.h"
 #include "conf.h"
 #include "http.h"
-#include "client.h"
 
-#include <jansson.h>
-#include <string.h>
-#include <evhttp.h>
-#include <netinet/in.h>
 #include <arpa/inet.h>
 #include <curl/curl.h>
+#include <evhttp.h>
+#include <jansson.h>
+#include <netinet/in.h>
+#include <string.h>
 
 struct memory {
-	char *response;
-	size_t size;
+  char *response;
+  size_t size;
 };
 
-char 
-*strbtwn(const char *str, const char *str1, const char *str2) {
-    const char *q;
-    const char *p = strstr(str, str1);
-    if (p) {
-        p += strlen(str1);
-        q = *str2 ? strstr(p, str2) : p + strlen(p);
-        if (q)
-            return strndup(p, q - p);
-    }
-    return NULL;
+char *strbtwn(const char *str, const char *str1, const char *str2) {
+  const char *q;
+  const char *p = strstr(str, str1);
+  if (p) {
+    p += strlen(str1);
+    q = *str2 ? strstr(p, str2) : p + strlen(p);
+    if (q)
+      return strndup(p, q - p);
+  }
+  return NULL;
 }
 
-static 
-size_t cb(void *data, size_t size, size_t nmemb, void *userp)
-{
-	size_t realsize = size * nmemb;
-	struct memory *mem = (struct memory *)userp;
+static size_t cb(void *data, size_t size, size_t nmemb, void *userp) {
+  size_t realsize = size * nmemb;
+  struct memory *mem = (struct memory *)userp;
 
-	char *ptr = realloc(mem->response, mem->size + realsize + 1);
-	if(ptr == NULL)
-		return 0;  /* out of memory! */
+  char *ptr = realloc(mem->response, mem->size + realsize + 1);
+  if (ptr == NULL)
+    return 0; /* out of memory! */
 
-	mem->response = ptr;
-	memcpy(&(mem->response[mem->size]), data, realsize);
-	mem->size += realsize;
-	mem->response[mem->size] = 0;
+  mem->response = ptr;
+  memcpy(&(mem->response[mem->size]), data, realsize);
+  mem->size += realsize;
+  mem->response[mem->size] = 0;
 
-	return realsize;
+  return realsize;
 }
 
-static int
-auth_ms(const char *token, const char *tenant, char *username) {  
+static int auth_ms(const char *token, const char *tenant, char *username) {
   CURLcode ret;
   CURL *hnd;
   struct curl_slist *slist;
 
-  char *header = (char*)malloc(2400 * sizeof(char));
-  snprintf(header, 2400, "Authorization: Bearer %s", token);
+  char *header = (char *)malloc(4096 * sizeof(char));
+  snprintf(header, 4096, "Authorization: Bearer %s", token);
 
   slist = NULL;
   slist = curl_slist_append(slist, header);
@@ -73,8 +69,8 @@ auth_ms(const char *token, const char *tenant, char *username) {
   ret = curl_easy_perform(hnd);
 
   long http_code = 0;
-  curl_easy_getinfo (hnd, CURLINFO_RESPONSE_CODE, &http_code);
-  
+  curl_easy_getinfo(hnd, CURLINFO_RESPONSE_CODE, &http_code);
+
   curl_easy_cleanup(hnd);
   hnd = NULL;
   curl_slist_free_all(slist);
@@ -92,8 +88,10 @@ auth_ms(const char *token, const char *tenant, char *username) {
       ident = json_string_value(json_object_get(parsed_rep, "@odata.id"));
 
       /* Compare tenant ID from token and declared tenant ID */
-      if(strcmp(tenant, strbtwn(ident, "https://graph.microsoft.com/v2/", "/directoryObjects/")) == 0) {
-        memcpy(username, json_string_value(json_object_get(parsed_rep, "mail")), 128);
+      if (strcmp(tenant, strbtwn(ident, "https://graph.microsoft.com/v2/",
+                                 "/directoryObjects/")) == 0) {
+        memcpy(username, json_string_value(json_object_get(parsed_rep, "mail")),
+               128);
         return 0;
       }
     }
@@ -104,94 +102,93 @@ auth_ms(const char *token, const char *tenant, char *username) {
   return 1;
 }
 
-int
-acl_match_client(struct acl *a, struct http_client *client, in_addr_t *ip) {
-	/* check Azure AD Auth, obtains user info */
-	const char *auth;
+int acl_match_client(struct acl *a, struct http_client *client, in_addr_t *ip) {
+  /* check Azure AD Auth, obtains user info */
+  const char *auth;
   char username[146] = "";
-  
-	auth = client_get_header(client, "Authorization");
-	if(a->tenant_id) {
-		if(auth && strncasecmp(auth, "Bearer ", 7) == 0) {
-			if(auth_ms(auth + 7, a->tenant_id, username)) {
-				return 0;
-			}
-		} else { /* no auth sent, required to match this ACL */
-			return 0;
-		}
-	}
 
-  
-	/* CIDR check. Comparision structure slightly altered from the original */
-	if(a->cidr.enabled == 0 || ((*ip) & a->cidr.mask) == (a->cidr.subnet & a->cidr.mask)) {
+  auth = client_get_header(client, "Authorization");
+  if (a->tenant_id) {
+    if (auth && strncasecmp(auth, "Bearer ", 7) == 0) {
+      if (auth_ms(auth + 7, a->tenant_id, username)) {
+        return 0;
+      }
+    } else { /* no auth sent, required to match this ACL */
+      return 0;
+    }
+  }
+
+  /* CIDR check. Comparision structure slightly altered from the original */
+  if (a->cidr.enabled == 0 ||
+      ((*ip) & a->cidr.mask) == (a->cidr.subnet & a->cidr.mask)) {
     /* Don't log for non-auths */
-    if(username[0] != '\0') {
+    if (username[0] != '\0') {
       strncat(username, " authenticated", 16);
       slog(client->s, WEBDIS_NOTICE, username, strlen(username));
     }
     return 1;
-	}
+  }
 
-	return 0;
+  return 0;
 }
 
-int
-acl_allow_command(struct cmd *cmd, struct conf *cfg, struct http_client *client) {
+int acl_allow_command(struct cmd *cmd, struct conf *cfg,
+                      struct http_client *client) {
 
-	char *always_off[] = {"MULTI", "EXEC", "WATCH", "DISCARD", "SELECT"};
+  char *always_off[] = {"MULTI", "EXEC", "WATCH", "DISCARD", "SELECT"};
 
-	unsigned int i;
-	int authorized = 1;
-	struct acl *a;
+  unsigned int i;
+  int authorized = 1;
+  struct acl *a;
 
-	in_addr_t client_addr;
+  in_addr_t client_addr;
 
-	const char *cmd_name;
-	size_t cmd_len;
+  const char *cmd_name;
+  size_t cmd_len;
 
-	if(cmd->count == 0) {
-		return 0;
-	}
+  if (cmd->count == 0) {
+    return 0;
+  }
 
-	cmd_name = cmd->argv[0];
-	cmd_len = cmd->argv_len[0];
+  cmd_name = cmd->argv[0];
+  cmd_len = cmd->argv_len[0];
 
-	/* some commands are always disabled, regardless of the config file. */
-	for(i = 0; i < sizeof(always_off) / sizeof(always_off[0]); ++i) {
-		if(strncasecmp(always_off[i], cmd_name, cmd_len) == 0) {
-			return 0;
-		}
-	}
+  /* some commands are always disabled, regardless of the config file. */
+  for (i = 0; i < sizeof(always_off) / sizeof(always_off[0]); ++i) {
+    if (strncasecmp(always_off[i], cmd_name, cmd_len) == 0) {
+      return 0;
+    }
+  }
 
-	/* find client's address */
-	client_addr = ntohl(client->addr);
+  /* find client's address */
+  client_addr = ntohl(client->addr);
 
-	/* go through permissions */
-	for(a = cfg->perms; a; a = a->next) {
+  /* go through permissions */
+  for (a = cfg->perms; a; a = a->next) {
 
-		if(!acl_match_client(a, client, &client_addr)) continue; /* match client */
+    if (!acl_match_client(a, client, &client_addr))
+      continue; /* match client */
 
-		/* go through authorized commands */
-		for(i = 0; i < a->enabled.count; ++i) {
-			if(strncasecmp(a->enabled.commands[i], cmd_name, cmd_len) == 0) {
-				authorized = 1;
-			}
-			if(strncasecmp(a->enabled.commands[i], "*", 1) == 0) {
-				authorized = 1;
-			}
-		}
+    /* go through authorized commands */
+    for (i = 0; i < a->enabled.count; ++i) {
+      if (strncasecmp(a->enabled.commands[i], cmd_name, cmd_len) == 0) {
+        authorized = 1;
+      }
+      if (strncasecmp(a->enabled.commands[i], "*", 1) == 0) {
+        authorized = 1;
+      }
+    }
 
-		/* go through unauthorized commands */
-		for(i = 0; i < a->disabled.count; ++i) {
-			if(strncasecmp(a->disabled.commands[i], cmd_name, cmd_len) == 0) {
-				authorized = 0;
-			}
-			if(strncasecmp(a->disabled.commands[i], "*", 1) == 0) {
-				authorized = 0;
-			}
-		}
-	}
+    /* go through unauthorized commands */
+    for (i = 0; i < a->disabled.count; ++i) {
+      if (strncasecmp(a->disabled.commands[i], cmd_name, cmd_len) == 0) {
+        authorized = 0;
+      }
+      if (strncasecmp(a->disabled.commands[i], "*", 1) == 0) {
+        authorized = 0;
+      }
+    }
+  }
 
-	return authorized;
+  return authorized;
 }
-
