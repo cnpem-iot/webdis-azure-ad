@@ -19,7 +19,7 @@
 
 		{
 			"tenant_id":	"$TENANT_ID",
-			"enabled":		["DEBUG", "SET", "DEL", "FLUSHDB", "FLUSHALL", "HSET", "LPUSH"]
+			"enabled":	["DEBUG", "SET", "DEL", "FLUSHDB", "FLUSHALL", "HSET", "LPUSH"]
 		}
 	],
 
